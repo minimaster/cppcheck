@@ -78,7 +78,7 @@ bool isOppositeCond(bool isNot, bool cpp, const Token * const cond1, const Token
 
 bool isOppositeExpression(bool cpp, const Token * const tok1, const Token * const tok2, const Library& library, bool pure, bool followVar, ErrorPath* errors=nullptr);
 
-bool isConstExpression(const Token *tok, const Library& library, bool pure);
+bool isConstExpression(const Token *tok, const Library& library, bool pure, bool cpp);
 
 bool isWithoutSideEffects(bool cpp, const Token* tok);
 
@@ -126,7 +126,6 @@ std::vector<const Token *> getArguments(const Token *ftok);
 
 /**
  * find lambda function end token
- * \todo handle explicit return type
  * \param first The [ token
  * \return nullptr or the }
  */

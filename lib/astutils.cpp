@@ -121,8 +121,11 @@ const Token * astIsVariableComparison(const Token *tok, const std::string &comp,
     } else if (comp == "!=" && rhs == std::string("0")) {
         ret = tok;
     } else if (comp == "==" && rhs == std::string("0")) {
-        if (tok->str() == "!")
+        if (tok->str() == "!") {
             ret = tok->astOperand1();
+            // handle (!(x!=0)) as (x==0)
+            astIsVariableComparison(ret, "!=", "0", &ret);
+        }
     }
     while (ret && ret->str() == ".")
         ret = ret->astOperand2();
@@ -180,9 +183,12 @@ static bool exprDependsOnThis(const Token *expr)
     // calling nonstatic method?
     if (Token::Match(expr->previous(), "!!:: %name% (") && expr->function() && expr->function()->nestedIn && expr->function()->nestedIn->isClassOrStruct()) {
         // is it a method of this?
-        const Scope *nestedIn = expr->scope();
-        while (nestedIn && nestedIn != expr->function()->nestedIn)
+        const Scope *nestedIn = expr->scope()->functionOf;
+        if (nestedIn && nestedIn->function)
+            nestedIn = nestedIn->function->token->scope();
+        while (nestedIn && nestedIn != expr->function()->nestedIn) {
             nestedIn = nestedIn->nestedIn;
+        }
         return nestedIn == expr->function()->nestedIn;
     }
     return exprDependsOnThis(expr->astOperand1()) || exprDependsOnThis(expr->astOperand2());
@@ -587,7 +593,7 @@ bool isOppositeExpression(bool cpp, const Token * const tok1, const Token * cons
     return false;
 }
 
-bool isConstExpression(const Token *tok, const Library& library, bool pure)
+bool isConstExpression(const Token *tok, const Library& library, bool pure, bool cpp)
 {
     if (!tok)
         return true;
@@ -599,10 +605,14 @@ bool isConstExpression(const Token *tok, const Library& library, bool pure)
     }
     if (tok->tokType() == Token::eIncDecOp)
         return false;
+    if (tok->isAssignmentOp())
+        return false;
+    if (isLikelyStreamRead(cpp, tok))
+        return false;
     // bailout when we see ({..})
     if (tok->str() == "{")
         return false;
-    return isConstExpression(tok->astOperand1(), library, pure) && isConstExpression(tok->astOperand2(), library, pure);
+    return isConstExpression(tok->astOperand1(), library, pure, cpp) && isConstExpression(tok->astOperand2(), library, pure, cpp);
 }
 
 bool isWithoutSideEffects(bool cpp, const Token* tok)
@@ -782,10 +792,10 @@ bool isVariableChangedByFunctionCall(const Token *tok, const Settings *settings,
         const unsigned int argCount = numberOfArguments(tok);
         const Scope *typeScope = tok->variable()->typeScope();
         if (typeScope) {
-            for (std::list<Function>::const_iterator it = typeScope->functionList.begin(); it != typeScope->functionList.end(); ++it) {
-                if (!it->isConstructor() || it->argCount() < argCount)
+            for (const Function &function : typeScope->functionList) {
+                if (!function.isConstructor() || function.argCount() < argCount)
                     continue;
-                const Variable *arg = it->getArgumentVar(argnr);
+                const Variable *arg = function.getArgumentVar(argnr);
                 if (arg && arg->isReference() && !arg->isConst())
                     return true;
             }
@@ -880,14 +890,14 @@ bool isVariableChanged(const Token *start, const Token *end, const unsigned int 
 
 bool isVariableChanged(const Variable * var, const Settings *settings, bool cpp)
 {
-    if(!var)
+    if (!var)
         return false;
-    if(!var->scope())
+    if (!var->scope())
         return false;
     const Token * start = var->declEndToken();
-    if(!start)
+    if (!start)
         return false;
-    if(Token::Match(start, "; %varid% =", var->declarationId()))
+    if (Token::Match(start, "; %varid% =", var->declarationId()))
         start = start->tokAt(2);
     return isVariableChanged(start->next(), var->scope()->bodyEnd, var->declarationId(), var->isGlobal(), settings, cpp);
 }
@@ -929,18 +939,12 @@ const Token *findLambdaEndToken(const Token *first)
 {
     if (!first || first->str() != "[")
         return nullptr;
-    const Token* tok = first->link();
-    if (Token::simpleMatch(tok, "] {"))
-        return tok->linkAt(1);
-    if (!Token::simpleMatch(tok, "] ("))
-        return nullptr;
-    tok = tok->linkAt(1)->next();
-    if (tok && tok->str() == "constexpr")
-        tok = tok->next();
-    if (tok && tok->str() == "mutable")
-        tok = tok->next();
-    if (tok && tok->str() == "{")
-        return tok->link();
+    const Token * tok = first;
+
+    if (tok->astOperand1() && tok->astOperand1()->str() == "(")
+        tok = tok->astOperand1();
+    if (tok->astOperand1() && tok->astOperand1()->str() == "{")
+        return tok->astOperand1()->link();
     return nullptr;
 }
 

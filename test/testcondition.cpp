@@ -1193,8 +1193,7 @@ private:
               "    else\n"
               "        return;\n"
               "}");
-        TODO_ASSERT_EQUALS("", "[test.cpp:3]: (warning) Logical conjunction always evaluates to false: neg < -1.0 && neg > -1.0.\n", errout.str());
-
+        ASSERT_EQUALS("", errout.str());
     }
 
     void incorrectLogicOperator8() { // opposite expressions
@@ -1657,6 +1656,12 @@ private:
               "  }\n"
               "}");
         ASSERT_EQUALS("", errout.str());
+
+        check("int * f(int * x, int * y) {\n"
+              "    if(!x) return x;\n"
+              "    return y;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
     }
 
     void oppositeInnerConditionClass() {
@@ -2038,6 +2043,20 @@ private:
               "    int get() const;\n"
               "};");
         ASSERT_EQUALS("", errout.str());
+
+        check("class C {\n"
+              "public:\n"
+              "  bool f() const { return x > 0; }\n"
+              "  void g();\n"
+              "  int x = 0;\n"
+              "};\n"
+              "\n"
+              "void C::g() {\n"
+              "  bool b = f();\n"
+              "  x += 1;\n"
+              "  if (!b && f()) {}\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
     }
 
     void identicalInnerCondition() {
@@ -2056,15 +2075,27 @@ private:
               "}\n");
         ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (warning) Identical inner 'if' condition is always true.\n", errout.str());
 
-        check("bool f(bool a) {\n"
-              "    if(a) { return a; }\n"
+        check("bool f(int a, int b) {\n"
+              "    if(a == b) { return a == b; }\n"
               "    return false;\n"
               "}\n");
         ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:2]: (warning) Identical inner 'return' condition is always true.\n", errout.str());
 
+        check("bool f(bool a) {\n"
+              "    if(a) { return a; }\n"
+              "    return false;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
         check("int* f(int* a, int * b) {\n"
               "    if(a) { return a; }\n"
               "    return b;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("int* f(std::shared_ptr<int> a, std::shared_ptr<int> b) {\n"
+              "    if(a.get()) { return a.get(); }\n"
+              "    return b.get();\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
 
@@ -2598,9 +2629,28 @@ private:
               "}\n");
         ASSERT_EQUALS("", errout.str());
 
+        check("int f(void){return 1/abs(10);}");
+        ASSERT_EQUALS("", errout.str());
+
         check("bool f() { \n"
               "    int x = 0;\n"
               "    return x; \n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("bool f() {\n"
+              "    const int a = 50;\n"
+              "    const int b = 52;\n"
+              "    return a+b;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("int f() {\n"
+              "    int a = 50;\n"
+              "    int b = 52;\n"
+              "    a++;\n"
+              "    b++;\n"
+              "    return a+b;\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
 

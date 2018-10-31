@@ -542,8 +542,8 @@ void CheckCondition::multiCondition2()
         std::vector<MULTICONDITIONTYPE> types = {MULTICONDITIONTYPE::INNER};
         if (Token::Match(scope.bodyStart, "{ return|throw|continue|break"))
             types.push_back(MULTICONDITIONTYPE::AFTER);
-        for(MULTICONDITIONTYPE type:types) {
-            if(type == MULTICONDITIONTYPE::AFTER) {
+        for (MULTICONDITIONTYPE type:types) {
+            if (type == MULTICONDITIONTYPE::AFTER) {
                 tok = scope.bodyEnd->next();
             } else {
                 tok = scope.bodyStart;
@@ -574,16 +574,7 @@ void CheckCondition::multiCondition2()
 
                     // Condition..
                     const Token *cond2 = tok->str() == "if" ? condStartToken->astOperand2() : condStartToken->astOperand1();
-                    // Check if returning boolean values
-                    if (tok->str() == "return") {
-                        const Variable * condVar = nullptr;
-                        if (Token::Match(cond2, "%var% ;"))
-                            condVar = cond2->variable();
-                        else if(Token::Match(cond2, ". %var% ;"))
-                            condVar = cond2->next()->variable();
-                        if (condVar && (condVar->isClass() || condVar->isPointer()))
-                            break;
-                    }
+                    const bool isReturnVar = (tok->str() == "return" && !Token::Match(cond2, "%cop%"));
 
                     ErrorPath errorPath;
 
@@ -599,10 +590,10 @@ void CheckCondition::multiCondition2()
                                 tokens1.push(firstCondition->astOperand1());
                                 tokens1.push(firstCondition->astOperand2());
                             } else if (!firstCondition->hasKnownValue()) {
-                                if (isOppositeCond(false, mTokenizer->isCPP(), firstCondition, cond2, mSettings->library, true, true, &errorPath)) {
+                                if (!isReturnVar && isOppositeCond(false, mTokenizer->isCPP(), firstCondition, cond2, mSettings->library, true, true, &errorPath)) {
                                     if (!isAliased(vars))
                                         oppositeInnerConditionError(firstCondition, cond2, errorPath);
-                                } else if (isSameExpression(mTokenizer->isCPP(), true, firstCondition, cond2, mSettings->library, true, true, &errorPath)) {
+                                } else if (!isReturnVar && isSameExpression(mTokenizer->isCPP(), true, firstCondition, cond2, mSettings->library, true, true, &errorPath)) {
                                     identicalInnerConditionError(firstCondition, cond2, errorPath);
                                 }
                             }
@@ -702,12 +693,12 @@ void CheckCondition::multiCondition2()
 
 static std::string innerSmtString(const Token * tok)
 {
-    if(!tok)
+    if (!tok)
         return "if";
-    if(!tok->astTop())
+    if (!tok->astTop())
         return "if";
     const Token * top = tok->astTop();
-    if(top->str() == "(" && top->astOperand1())
+    if (top->str() == "(" && top->astOperand1())
         return top->astOperand1()->str();
     return top->str();
 }
@@ -1235,6 +1226,25 @@ void CheckCondition::clarifyConditionError(const Token *tok, bool assign, bool b
                 errmsg, CWE398, false);
 }
 
+static bool isConstVarExpression(const Token * tok)
+{
+    if (!tok)
+        return false;
+    if (Token::Match(tok, "%cop%")) {
+        if (tok->astOperand1() && !isConstVarExpression(tok->astOperand1()))
+            return false;
+        if (tok->astOperand2() && !isConstVarExpression(tok->astOperand2()))
+            return false;
+        return true;
+    }
+    if (Token::Match(tok, "%bool%|%num%|%str%|%char%|nullptr|NULL"))
+        return true;
+    if (tok->isEnumerator())
+        return true;
+    if (tok->variable())
+        return tok->variable()->isConst();
+    return false;
+}
 
 void CheckCondition::alwaysTrueFalse()
 {
@@ -1264,19 +1274,22 @@ void CheckCondition::alwaysTrueFalse()
             const bool constValExpr = tok->isNumber() && Token::Match(tok->astParent(),"%oror%|&&|?"); // just one number in boolean expression
             const bool compExpr = Token::Match(tok, "%comp%|!"); // a compare expression
             const bool returnStatement = Token::simpleMatch(tok->astTop(), "return") &&
-                Token::Match(tok->astParent(), "%oror%|&&|return");
+                                         Token::Match(tok->astParent(), "%oror%|&&|return");
 
             if (!(constIfWhileExpression || constValExpr || compExpr || returnStatement))
                 continue;
 
-            if(returnStatement && (tok->isEnumerator() || Token::Match(tok, "nullptr|NULL")))
+            if (returnStatement && scope->function && !Token::simpleMatch(scope->function->retDef, "bool"))
                 continue;
 
-            if(returnStatement && Token::simpleMatch(tok->astParent(), "return") && tok->variable() && (
-                !tok->variable()->isLocal() ||
-                tok->variable()->isReference() ||
-                tok->variable()->isConst() || 
-                !isVariableChanged(tok->variable(), mSettings, mTokenizer->isCPP())))
+            if (returnStatement && isConstVarExpression(tok))
+                continue;
+
+            if (returnStatement && Token::simpleMatch(tok->astParent(), "return") && tok->variable() && (
+                    !tok->variable()->isLocal() ||
+                    tok->variable()->isReference() ||
+                    tok->variable()->isConst() ||
+                    !isVariableChanged(tok->variable(), mSettings, mTokenizer->isCPP())))
                 continue;
 
             // Don't warn in assertions. Condition is often 'always true' by intention.
